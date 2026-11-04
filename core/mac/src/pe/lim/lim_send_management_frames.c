@@ -2155,6 +2155,29 @@ QDF_STATUS lim_fill_adaptive_11r_ie(struct pe_session *pe_session,
 }
 #endif
 
+static bool lim_omit_psk_sae_rsnxe(struct pe_session *session,
+				 const uint8_t *rsnxe)
+{
+	struct bss_description *bss = &session->lim_join_req->bssDescription;
+	uint16_t ie_len = lim_get_ielen_from_bss_description(bss);
+	uint32_t akm = wlan_crypto_get_param(session->vdev,
+					   WLAN_CRYPTO_PARAM_KEY_MGMT);
+
+	if (rsnxe[1] != 1 || rsnxe[2] != WLAN_CRYPTO_RSNX_CAP_SAE_H2E)
+		return false;
+
+	if (!(QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_PSK) ||
+	      QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_FT_PSK) ||
+	      QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_PSK_SHA256)) ||
+	    QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_SAE) ||
+	    QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_FT_SAE))
+		return false;
+
+	/* Match supplicant SME's legacy WPA2 AP compatibility policy. */
+	return ie_len && !wlan_get_ie_ptr_from_eid(WLAN_ELEMID_RSNXE,
+						 (uint8_t *)bss->ieFields, ie_len);
+}
+
 /**
  * lim_send_assoc_req_mgmt_frame() - Send association request
  * @mac_ctx: Handle to MAC context
@@ -2612,6 +2635,8 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 			goto end;
 		}
 		rsnx_ie_len = rsnx_ie[1] + 2;
+		if (lim_omit_psk_sae_rsnxe(pe_session, rsnx_ie))
+			rsnx_ie_len = 0;
 	}
 	/* MSCS ext ie */
 	if (add_ie_len &&
